@@ -1,25 +1,36 @@
 %code top{
 #include <stdio.h>
 #include <math.h>
-#include "archivo.h"
+#include "scanner.h"
 #include "calc.h"
-}
-
-%code provides{
-void yyerror(const char *);
-extern int yylexerrs;
 
 symrec *aux;
 
 }
 
+%code provides{
+void yyerror(const char *);
+//extern int yylexerrs;
+
+struct YYSTYPE{
+	double dval;
+	struct symrec *idval;
+};
+
+}
+
 %defines "parser.h"
 %output "parser.c"
-%define api.value.type {char *}
+%define api.value.type {struct YYSTYPE}
 %define parse.error verbose
 %start programa
 
-%token NUMERO IDENTIFICADOR FUNCION
+%token NL
+%token <dval> NUMERO 
+%token <idval> IDENTIFICADOR 
+%token <idval> FUNCION
+%nterm <dval> expresion
+%nterm <dval> declaracion
 
 %token VAR CONSTANTE SALIR
 
@@ -28,8 +39,8 @@ symrec *aux;
 %token ASIGPOR "*="
 %token ASIGDIV "/="
 
-%precedence '=' 
-%right "+=" "-=" "*=" "/="
+
+%right '=' "+=" "-=" "*=" "/="
 %left '+' '-'
 %left '*' '/'
 %precedence NEG
@@ -39,20 +50,20 @@ symrec *aux;
 
 %%
 
-programa		: lista-de-sentencias { if (yynerrs || yylexerrs) YYABORT; else YYACCEPT; }
+programa		: lista-de-sentencias //{ if (yynerrs || yylexerrs) YYABORT; else YYACCEPT; }
 			;
 lista-de-sentencias	: lista-de-sentencias sentencia
 			| %empty
 			;
-sentencia 		: declaracion 
-			| definicion 
-			| expresion 
-			| SALIR 
-			| error 
+sentencia 		: NL
+			| declaracion NL 
+			| expresion NL { printf("\t%g\n", $1) ;}
+			| error NL
+			| SALIR NL { return 0; }
 			;
-declaracion		: CONSTANTE IDENTIFICADOR '=' expresion  { aux=getsym($2); if (aux) { printf("Es una constante, no se puede redeclarar") ;} else { printf("Se declara una nueva variable con nombre %s y se inicializa en %f \n",$2,$4); aux=putsym(strdup($2),TYP_CTE); $$=(aux->valor.nro)=$4 ;} }
-			| VAR IDENTIFICADOR 		   	 { aux=getsym($2); if (aux) { printf("Se esta redeclarando la variable") ;} else { printf("La variable %s no esta declarada, se considera que posee valor cero \n",$2); $$=0; } }
-			| VAR IDENTIFICADOR '=' expresion 	 { aux=getsym($2); if (aux) { printf("Se esta redeclarando la variable") ;} else { printf("Se declara una nueva variable con nombre %s y se inicializa en %f \n",$2,$4); aux=putsym(strdup($2),TYP_VAR); $$=(aux->valor.nro)=$4 ;} }
+declaracion		: CONSTANTE IDENTIFICADOR '=' expresion  {if ($2->existe) { printf("Se esta redeclarando la constante\n"); YYERROR;} else { printf("%s: %f\n", $2->nombre, $4); putsym($2->nombre, 2, $4) ; $$=$2->valor.nro = $4; } }
+			| VAR IDENTIFICADOR 		   	 {if ($2->existe) { printf("Se esta redeclarando la variable\n"); YYERROR;} else { printf("%s: 0\n", $2->nombre); putsym($2->nombre, 0, 0) ; $$=0; } }
+			| VAR IDENTIFICADOR '=' expresion 	 {if ($2->existe) { printf("Se esta redeclarando la variable\n"); YYERROR;} else { printf("%s: %f\n", $2->nombre, $4); putsym($2->nombre, 0, $4); $$=$4; } }
 			;
 
 
@@ -65,21 +76,13 @@ expresion		: expresion '+' expresion 		{ $$ = $1 + $3;                    }
 			| '-' expresion %prec NEG 		{ $$ = -$2;                        }
 			| '(' expresion ')' 	  		{ $$ = $2;                         }
 			| FUNCION '(' expresion ')'		{ $$ = $1->valor.func($3);         }
-			| IDENTIFICADOR 	  		{ aux=getsym($1); if (aux) { $$ = (aux->nro)    ;} else {printf("error no esta declarado\n> "); yyerror;}}
+			| IDENTIFICADOR 	  		{ if ($1->existe) { $$ = $1->valor.nro ;} else {printf("Error %s no esta declarado\n", $1->nombre); YYERROR;}}
 			| NUMERO 		  		{ $$ = $1; }
-			;
-			
-definicion		: IDENTIFICADOR {if ($1->tipo != VAR) {printf("error\n> "); YYERROR;}} '=' definicion  	
-								{$1->valor.nro = $4; $$ = $1->valor.nro;}
-			| IDENTIFICADOR {if ($1->tipo != VAR) {printf("error\n> "); YYERROR;}} ASIGMAS definicion	
-								{$1->valor.nro += $4; $$ = $1->valor.nro;}
-			| IDENTIFICADOR {if ($1->tipo != VAR) {printf("error\n> "); YYERROR;}} ASIGMENOS definicion	
-								{$1->valor.nro -= $4; $$ = $1->valor.nro;}
-			| IDENTIFICADOR {if ($1->tipo != VAR) {printf("error\n> "); YYERROR;}} ASIGPOR definicion	
-								{$1->valor.nro *= $4; $$ = $1->valor.nro;}
-			| IDENTIFICADOR {if ($1->tipo != VAR) {printf("error\n> "); YYERROR;}} ASIGDIV definicion	
-								{$1->valor.nro /= $4; $$ = $1->valor.nro;}
-			| expresion  				
+			| IDENTIFICADOR '=' expresion  		{if (! $1->existe) {printf("El identificador no esta declarado\n> "); YYERROR;} if (! $1->tipo) $$ = $1->valor.nro = $3; else { printf("Es una constante, no se puede asignar el valor\n"); YYERROR;} }
+			| IDENTIFICADOR ASIGMAS expresion	{if (! $1->existe) {printf("El identificador no esta declarado\n> "); YYERROR;} if (! $1->tipo) $$ = $1->valor.nro = $1->valor.nro + $3; else { printf("Es una constante, no se puede asignar el valor\n"); YYERROR;} }
+			| IDENTIFICADOR ASIGMENOS expresion	{if (! $1->existe) {printf("El identificador no esta declarado\n> "); YYERROR;} if (! $1->tipo) $$ = $1->valor.nro = $1->valor.nro - $3; else { printf("Es una constante, no se puede asignar el valor\n"); YYERROR;} }
+			| IDENTIFICADOR ASIGPOR expresion	{if (! $1->existe) {printf("El identificador no esta declarado\n> "); YYERROR;} if (! $1->tipo) $$ = $1->valor.nro = $1->valor.nro * $3; else { printf("Es una constante, no se puede asignar el valor\n"); YYERROR;} }
+			| IDENTIFICADOR ASIGDIV expresion	{if (! $1->existe) {printf("El identificador no esta declarado\n> "); YYERROR;} if (! $1->tipo) $$ = $1->valor.nro = $1->valor.nro / $3; else { printf("Es una constante, no se puede asignar el valor\n"); YYERROR;} }
 			;
 
 %%

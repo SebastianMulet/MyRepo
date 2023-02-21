@@ -4,14 +4,9 @@
 #include "parser.h"
 #include "calc.h"
 
-void yyerror (char const *s)
-{
-    fprintf (stderr, "%s\n", s);
-}
 
 
-symrec *sym_table;
-
+extern symrec *sym_table;
 
 struct init
 {
@@ -38,10 +33,11 @@ static void init_table(){
   int i;
   for (i = 0; arith_fncts[i].nombre != 0; i++)
     {
-      symrec *ptr = putsym (arith_fncts[i].nombre, TYP_FNCT);
+      symrec *ptr = putsym (arith_fncts[i].nombre, TYP_FNCT, 0);
       ptr->valor.func = arith_fncts[i].func;
     }
-
+	putsym("pi", 2, M_PI);
+	putsym("e", 2, M_E);
 }
 
 
